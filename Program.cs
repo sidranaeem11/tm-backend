@@ -27,12 +27,11 @@ builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
-// Apply pending migrations automatically on startup
-using (var scope = app.Services.CreateScope())
-{
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    db.Database.Migrate();
-}
+// Note: migrations already applied to the production database (Neon).
+// Auto-migrating on every startup uses extra memory, which can crash
+// the app on low-RAM free hosting plans — so we skip it here.
+// To apply new migrations in the future, run `dotnet ef database update`
+// locally against the production connection string instead.
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
