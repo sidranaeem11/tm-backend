@@ -1,16 +1,69 @@
+using System;
+using System.IO;
+using Npgsql;
 using backend.Data;
 using Microsoft.EntityFrameworkCore;
 
+AppDomain.CurrentDomain.UnhandledException += (sender, e) =>
+{
+    var ex = e.ExceptionObject as Exception;
+    Console.WriteLine("===== CRASH =====");
+    Console.WriteLine($"Message: {ex?.Message}");
+    Console.WriteLine($"Type: {ex?.GetType().FullName}");
+    Console.WriteLine($"Stack: {ex?.StackTrace}");
+    Console.WriteLine($"Inner: {ex?.InnerException?.Message}");
+    Console.WriteLine("=================");
+    Console.Out.Flush();
+};
+
+TaskScheduler.UnobservedTaskException += (sender, e) =>
+{
+    Console.WriteLine("===== TASK EXCEPTION =====");
+    Console.WriteLine($"Message: {e.Exception?.Message}");
+    Console.WriteLine($"Stack: {e.Exception?.StackTrace}");
+    Console.WriteLine("==========================");
+    Console.Out.Flush();
+    e.SetObserved();
+};
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
+// ===== PORT (Railway / Render ke liye zaroori) =====
+var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
+builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
+
+// ===== DATABASE CONNECTION CHECK (optional, sirf log ke liye) =====
+try
+{
+    var connString = builder.Configuration.GetConnectionString("DefaultConnection");
+    if (string.IsNullOrWhiteSpace(connString))
+    {
+        Console.WriteLine("===== CONNECTION STRING IS EMPTY! =====");
+    }
+    else
+    {
+        // Password ko log mein mat print karo — sirf host/db dikhao
+        Console.WriteLine("===== CONNECTION STRING FOUND (hidden for security) =====");
+        using var connection = new NpgsqlConnection(connString);
+        connection.Open();
+        Console.WriteLine("===== DATABASE CONNECTED SUCCESSFULLY =====");
+    }
+}
+catch (Exception ex)
+{
+    Console.WriteLine("===== DATABASE CONNECTION FAILED =====");
+    Console.WriteLine($"Message: {ex.Message}");
+    Console.WriteLine($"Type: {ex.GetType().FullName}");
+    Console.WriteLine($"Inner: {ex.InnerException?.Message}");
+    Console.WriteLine("=====================================");
+}
+Console.Out.Flush();
+
 builder.Services.AddControllers();
 
-// EF Core + PostgreSQL
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-// CORS - allow frontend (any origin during development, including phone on local network)
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
@@ -21,32 +74,52 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Swagger / API docs
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
-// Note: migrations already applied to the production database (Neon).
-// Auto-migrating on every startup uses extra memory, which can crash
-// the app on low-RAM free hosting plans — so we skip it here.
-// To apply new migrations in the future, run `dotnet ef database update`
-// locally against the production connection string instead.
-
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+// ===== AUTO MIGRATION — database tables khud ban jayenge =====
+try
 {
+    using var scope = app.Services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    Console.WriteLine("===== APPLYING MIGRATIONS =====");
+    db.Database.Migrate();
+    Console.WriteLine("===== MIGRATIONS APPLIED SUCCESSFULLY =====");
+}
+catch (Exception ex)
+{
+    Console.WriteLine("===== MIGRATION FAILED =====");
+    Console.WriteLine($"Message: {ex.Message}");
+    Console.WriteLine($"Inner: {ex.InnerException?.Message}");
+    Console.WriteLine("===========================");
+}
+Console.Out.Flush();
+
+try
+{
+    // Swagger hamesha ON — production mein bhi
     app.UseSwagger();
     app.UseSwaggerUI();
+
+    app.UseCors("AllowFrontend");
+    app.UseStaticFiles();
+    app.UseAuthorization();
+    app.MapControllers();
+
+    Console.WriteLine("===== APP STARTED SUCCESSFULLY =====");
+    Console.Out.Flush();
+    app.Run();
 }
-
-app.UseCors("AllowFrontend");
-
-// Serve uploaded images from wwwroot/uploads
-app.UseStaticFiles();
-
-app.UseAuthorization();
-
-app.MapControllers();
-
-app.Run();
+catch (Exception ex)
+{
+    Console.WriteLine("===== STARTUP CRASH =====");
+    Console.WriteLine($"Message: {ex.Message}");
+    Console.WriteLine($"Type: {ex.GetType().FullName}");
+    Console.WriteLine($"Stack: {ex.StackTrace}");
+    Console.WriteLine($"Inner: {ex.InnerException?.Message}");
+    Console.WriteLine("=========================");
+    Console.Out.Flush();
+    throw;
+}
